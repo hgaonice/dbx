@@ -16,6 +16,13 @@ export interface TabResultSnapshot {
   result?: QueryResult;
   results?: QueryResult[];
   activeResultIndex?: number;
+  /**
+   * Source ordering retained while a local grid sort is active. It must travel
+   * with the snapshot so clearing the sort after a cache/archive restore can
+   * still return to the original result order.
+   */
+  resultLocalSortOriginalRows?: QueryResult["rows"];
+  resultLocalSortOriginalMongoDocuments?: QueryResult["mongo_documents"];
   resultRuns?: QueryTab["resultRuns"];
   activeResultRunId?: string;
   queryAnalysis?: QueryTab["queryAnalysis"];
@@ -36,6 +43,7 @@ interface ColumnarQueryResult {
   column_types?: string[];
   columnValues: CellValue[][];
   rowCount: number;
+  mongo_documents?: unknown[];
   affected_rows: number;
   execution_time_ms: number;
   truncated?: boolean;
@@ -128,6 +136,7 @@ function stripSessionIds(result: QueryResult | undefined): QueryResult | undefin
     columns: [...result.columns],
     column_types: result.column_types ? [...result.column_types] : undefined,
     rows: result.rows.map((row) => [...row]),
+    mongo_documents: result.mongo_documents ? clonePlain(result.mongo_documents) : undefined,
     affected_rows: result.affected_rows,
     execution_time_ms: result.execution_time_ms,
     truncated: result.truncated,
@@ -147,6 +156,8 @@ function stripResultRunSessionIds(resultRuns: QueryTab["resultRuns"]): QueryTab[
     ...run,
     result: stripSessionIds(run.result),
     results: stripResultSessionIds(run.results),
+    resultLocalSortOriginalRows: run.resultLocalSortOriginalRows?.map((row) => [...row]),
+    resultLocalSortOriginalMongoDocuments: run.resultLocalSortOriginalMongoDocuments ? clonePlain(run.resultLocalSortOriginalMongoDocuments) : undefined,
     resultSessionId: undefined,
   }));
 }
@@ -159,6 +170,7 @@ function toColumnarResult(result: QueryResult | undefined): ColumnarQueryResult 
     column_types: result.column_types ? [...result.column_types] : undefined,
     columnValues,
     rowCount: result.rows.length,
+    mongo_documents: result.mongo_documents ? clonePlain(result.mongo_documents) : undefined,
     affected_rows: result.affected_rows,
     execution_time_ms: result.execution_time_ms,
     truncated: result.truncated,
@@ -175,6 +187,7 @@ function fromColumnarResult(result: ColumnarQueryResult | undefined): QueryResul
     columns: [...result.columns],
     column_types: result.column_types ? [...result.column_types] : undefined,
     rows,
+    mongo_documents: result.mongo_documents ? clonePlain(result.mongo_documents) : undefined,
     affected_rows: result.affected_rows,
     execution_time_ms: result.execution_time_ms,
     truncated: result.truncated,
@@ -364,6 +377,8 @@ export function buildTabResultSnapshot(tab: QueryTab): TabResultSnapshot | undef
     result: stripSessionIds(tab.result),
     results: stripResultSessionIds(tab.results),
     activeResultIndex: tab.activeResultIndex,
+    resultLocalSortOriginalRows: tab.resultLocalSortOriginalRows?.map((row) => [...row]),
+    resultLocalSortOriginalMongoDocuments: tab.resultLocalSortOriginalMongoDocuments ? clonePlain(tab.resultLocalSortOriginalMongoDocuments) : undefined,
     resultRuns: stripResultRunSessionIds(tab.resultRuns),
     activeResultRunId: tab.activeResultRunId,
     queryAnalysis: tab.queryAnalysis ? clonePlain(tab.queryAnalysis) : undefined,

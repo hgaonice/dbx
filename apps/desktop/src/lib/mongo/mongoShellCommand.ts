@@ -498,6 +498,7 @@ export function mongoDocumentsToQueryResult(documents: unknown[], executionTimeM
   return {
     columns,
     rows,
+    mongo_documents: documents,
     affected_rows: total,
     execution_time_ms: Math.max(0, Math.round(executionTimeMs)),
     truncated: total > documents.length,

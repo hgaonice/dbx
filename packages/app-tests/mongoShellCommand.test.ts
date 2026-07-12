@@ -480,6 +480,10 @@ test("mongoDocumentsToQueryResult turns mongo documents into grid rows", () => {
     ["1", "Ada", '{"role":"admin"}', null],
     ["2", "Lin", null, true],
   ]);
+  assert.deepEqual(result.mongo_documents, [
+    { _id: "1", name: "Ada", profile: { role: "admin" } },
+    { _id: "2", active: true, name: "Lin" },
+  ]);
   assert.equal(result.affected_rows, 12);
   assert.equal(result.execution_time_ms, 5);
   assert.equal(result.truncated, true);

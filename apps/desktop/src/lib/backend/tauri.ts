@@ -27,6 +27,7 @@ import type {
   DatabaseType,
   InstalledPlugin,
   JdbcDriverInfo,
+  JdbcLocalBundleInfo,
   JdbcMavenBundleInfo,
   JdbcPluginStatus,
   SavedSqlFile,
@@ -52,7 +53,7 @@ import type {
 } from "@/lib/dataGrid/dataGridSql";
 import type { DataCompareFromTablesOptions, DataCompareFromTablesPreparation, DataCompareSyncPlan, DataCompareSyncPlanOptions, DataComparePreparation, DataComparePreparationOptions } from "@/lib/dataGrid/dataCompare";
 import type { SchemaDiffPreparation, SchemaDiffPreparationOptions, TableDiff, FunctionDiff, SequenceDiff, RuleDiff, OwnerDiff } from "@/lib/schema/schemaDiff";
-import type { BuildTableStructureChangeSqlOptions, BuildSingleColumnAlterSqlOptions, TableStructureChangeSql } from "@/lib/table/tableStructureEditorSql";
+import type { BuildTableStructureChangeSqlOptions, BuildSingleColumnAlterSqlOptions, SqliteTableStructureChangePreview, TableStructureChangeSql } from "@/lib/table/tableStructureEditorSql";
 import type { BuildTableSelectSqlOptions } from "@/lib/table/tableSelectSql";
 import type { DatabaseSearchSql, DatabaseSearchSqlOptions, SearchResultWhereOptions } from "@/lib/database/databaseSearch";
 import type { BuildEditableObjectSourceSqlInput, BuildRoutineRenameObjectSourceInput } from "@/lib/table/objectSourceEditor";
@@ -201,6 +202,33 @@ export interface WebDavSyncSecretsStatus {
   hasSavedPassphrase: boolean;
 }
 
+export type SnippetProvider = "github" | "gitee";
+
+export interface SnippetSyncConfig {
+  provider: SnippetProvider;
+  token?: string;
+  snippetId?: string;
+}
+
+export interface SnippetSyncSummary {
+  provider: SnippetProvider;
+  snippetId: string;
+  bytes: number;
+  exportedAt?: string;
+  appVersion?: string;
+}
+
+export interface SnippetDownloadResult {
+  summary: SnippetSyncSummary;
+  editorSettings?: unknown;
+  desktopSettings: DesktopSettings;
+  applySummary: WebDavDownloadResult["applySummary"];
+}
+
+export interface SnippetTokenStatus {
+  hasSavedToken: boolean;
+}
+
 export interface AppSupportInfo {
   appVersion: string;
   runtime: "desktop" | "web";
@@ -253,6 +281,8 @@ export interface QuerySqlBuildResult {
 export interface BuildExplainSqlOptions {
   databaseType?: DatabaseType;
   sql: string;
+  /** MySQL can return either the existing JSON plan or its native tabular plan. */
+  format?: "json" | "standard";
 }
 
 export interface ExplainSqlBuildResult {
@@ -494,6 +524,30 @@ export async function webdavSyncUpload(config: WebDavConfig, editorSettings?: un
 
 export async function webdavSyncDownload(config: WebDavConfig, secretsPassphrase?: string): Promise<WebDavDownloadResult> {
   return invoke("webdav_sync_download", { config, secretsPassphrase });
+}
+
+export async function snippetSyncTest(config: SnippetSyncConfig): Promise<void> {
+  return invoke("snippet_sync_test", { config });
+}
+
+export async function snippetTokenStatus(config: SnippetSyncConfig): Promise<SnippetTokenStatus> {
+  return invoke("snippet_token_status", { config });
+}
+
+export async function saveSnippetSavedToken(config: SnippetSyncConfig, token: string): Promise<void> {
+  return invoke("save_snippet_saved_token", { config, token });
+}
+
+export async function forgetSnippetSavedToken(config: SnippetSyncConfig): Promise<void> {
+  return invoke("forget_snippet_saved_token", { config });
+}
+
+export async function snippetSyncUpload(config: SnippetSyncConfig, editorSettings?: unknown, secretsPassphrase?: string): Promise<SnippetSyncSummary> {
+  return invoke("snippet_sync_upload", { config, editorSettings, secretsPassphrase });
+}
+
+export async function snippetSyncDownload(config: SnippetSyncConfig, secretsPassphrase?: string): Promise<SnippetDownloadResult> {
+  return invoke("snippet_sync_download", { config, secretsPassphrase });
 }
 
 export async function loadPinnedTreeNodeIds(): Promise<string[]> {
@@ -895,6 +949,14 @@ export async function buildTableStructureChangeSql(options: BuildTableStructureC
   return invoke("build_table_structure_change_sql", { options });
 }
 
+export async function previewSqliteTableStructureChange(connectionId: string, database: string, options: BuildTableStructureChangeSqlOptions): Promise<SqliteTableStructureChangePreview> {
+  return invoke("preview_sqlite_table_structure_change", { connectionId, database, options });
+}
+
+export async function applySqliteTableStructureChange(connectionId: string, database: string, options: BuildTableStructureChangeSqlOptions, schemaRevision: string): Promise<QueryResult> {
+  return invoke("apply_sqlite_table_structure_change", { connectionId, database, options, schemaRevision });
+}
+
 export async function buildCreateTableSql(options: BuildTableStructureChangeSqlOptions): Promise<TableStructureChangeSql> {
   return invoke("build_create_table_sql", { options });
 }
@@ -1072,6 +1134,10 @@ export async function listJdbcMavenBundles(): Promise<JdbcMavenBundleInfo[]> {
   return invoke("list_jdbc_maven_bundles");
 }
 
+export async function listJdbcLocalBundles(): Promise<JdbcLocalBundleInfo[]> {
+  return invoke("list_jdbc_local_bundles");
+}
+
 export async function importJdbcDrivers(paths: (string | File)[]): Promise<JdbcDriverInfo[]> {
   if (paths.some((path) => typeof path !== "string")) {
     throw new Error("Desktop JDBC driver import requires local file paths");
@@ -1093,6 +1159,10 @@ export async function deleteJdbcDriver(path: string): Promise<JdbcDriverInfo[]> 
 
 export async function deleteJdbcMavenBundle(bundleId: string): Promise<JdbcDriverInfo[]> {
   return invoke("delete_jdbc_maven_bundle", { bundleId });
+}
+
+export async function deleteJdbcLocalBundle(bundleId: string): Promise<JdbcDriverInfo[]> {
+  return invoke("delete_jdbc_local_bundle", { bundleId });
 }
 
 export async function jdbcPluginStatus(): Promise<JdbcPluginStatus> {
@@ -1118,8 +1188,8 @@ export async function listInstalledAgentsLocal(): Promise<AgentDriverInfo[]> {
   return invoke("list_installed_agents_local");
 }
 
-export async function listInstalledAgents(): Promise<AgentDriverInfo[]> {
-  return invoke("list_installed_agents");
+export async function listInstalledAgents(source?: UpdateDownloadSource): Promise<AgentDriverInfo[]> {
+  return invoke("list_installed_agents", { source });
 }
 
 export async function isAgentInstalled(dbType: string): Promise<boolean> {
@@ -1146,12 +1216,12 @@ export async function restartDriverRuntime(runtimeId: string): Promise<void> {
   return invoke("restart_driver_runtime", { runtimeId });
 }
 
-export async function installAgent(dbType: string): Promise<void> {
-  return invoke("install_agent", { dbType });
+export async function installAgent(dbType: string, source?: UpdateDownloadSource): Promise<void> {
+  return invoke("install_agent", { dbType, source });
 }
 
-export async function upgradeAllAgents(): Promise<UpgradeAllAgentDriversResult> {
-  return invoke("upgrade_all_agents");
+export async function upgradeAllAgents(source?: UpdateDownloadSource): Promise<UpgradeAllAgentDriversResult> {
+  return invoke("upgrade_all_agents", { source });
 }
 
 export async function checkAgentUpdateBlockers(dbTypes: string[]): Promise<AgentUpdateBlocker[]> {
@@ -1188,8 +1258,8 @@ export async function importAgentJar(dbType: string, path: string | File): Promi
   return invoke("import_agent_jar_cmd", { dbType, path });
 }
 
-export async function reinstallJre(jreKey?: string): Promise<void> {
-  return invoke("reinstall_jre", { jreKey });
+export async function reinstallJre(jreKey?: string, source?: UpdateDownloadSource): Promise<void> {
+  return invoke("reinstall_jre", { jreKey, source });
 }
 
 export async function uninstallJre(jreKey: string): Promise<void> {
@@ -2312,18 +2382,19 @@ export async function exportTableDataCsv(options: TableCsvExportOptions): Promis
   return invoke("export_table_data_csv", { request: options });
 }
 
-export async function exportQueryResultXlsx(filePath: string, sheetName: string | undefined, columns: string[], rows: readonly (readonly XlsxCellValue[])[]): Promise<void> {
+export async function exportQueryResultXlsx(filePath: string, sheetName: string | undefined, columns: string[], columnTypes: string[], rows: readonly (readonly XlsxCellValue[])[]): Promise<void> {
   return invoke("export_query_result_xlsx", {
     request: {
       filePath,
       sheetName,
       columns,
+      columnTypes,
       rows,
     },
   });
 }
 
-export async function exportQueryResultsXlsx(filePath: string, worksheets: readonly { sheetName?: string; columns: string[]; rows: readonly (readonly XlsxCellValue[])[] }[]): Promise<void> {
+export async function exportQueryResultsXlsx(filePath: string, worksheets: readonly { sheetName?: string; columns: string[]; columnTypes?: string[]; rows: readonly (readonly XlsxCellValue[])[] }[]): Promise<void> {
   return invoke("export_query_results_xlsx", {
     request: {
       filePath,

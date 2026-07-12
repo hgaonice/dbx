@@ -6,7 +6,7 @@ use calamine::{open_workbook_auto, Data, Reader};
 use chrono::{DateTime, NaiveDate, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 
-use crate::connection::AppState;
+use crate::connection::{task_client_session_id, AppState};
 use crate::models::connection::DatabaseType;
 use crate::transfer::{
     execute_on_pool, generate_insert_typed, get_columns_for_transfer, qualified_table, quote_identifier,
@@ -16,6 +16,10 @@ pub const DEFAULT_PREVIEW_LIMIT: usize = 50;
 pub const DEFAULT_BATCH_SIZE: usize = 500;
 pub const CREATE_TABLE_INFERENCE_ROWS: usize = 100;
 pub const MAX_NON_STREAMING_IMPORT_BYTES: u64 = 100 * 1024 * 1024;
+
+pub fn table_import_client_session_id(import_id: &str) -> String {
+    task_client_session_id("table-import", import_id)
+}
 
 #[derive(Debug, Clone)]
 pub struct ParsedImportFile {
@@ -764,6 +768,10 @@ pub fn build_import_insert_batch_from_rows(
     Ok((!sql.trim().is_empty()).then_some(ImportSqlBatch { sql, row_count: rows.len() }))
 }
 
+fn supports_multi_row_insert_values(db_type: &DatabaseType) -> bool {
+    !matches!(db_type, DatabaseType::Oracle | DatabaseType::OceanbaseOracle | DatabaseType::Iris)
+}
+
 pub fn build_import_insert_batches(
     data: &ParsedImportFile,
     mappings: &[TableImportColumnMapping],
@@ -784,12 +792,9 @@ pub fn build_import_insert_batches(
                 .map(|(_, data_type)| data_type.clone())
         })
         .collect::<Vec<_>>();
-    let batch_size = match db_type {
-        // Oracle-compatible drivers reject INSERT ... VALUES (...), (...), so
-        // keep import batches executable as single-row statements.
-        DatabaseType::Oracle | DatabaseType::OceanbaseOracle => 1,
-        _ => batch_size.max(1),
-    };
+    // Drivers without multi-row VALUES support still benefit from the agent
+    // batching the generated single-row statements during execution.
+    let batch_size = if supports_multi_row_insert_values(db_type) { batch_size.max(1) } else { 1 };
     let mut batches = Vec::new();
 
     for chunk in data.rows.chunks(batch_size) {
@@ -1701,11 +1706,13 @@ mod tests {
             XlsxWorksheetData {
                 sheet_name: Some("First".to_string()),
                 columns: vec!["id".to_string()],
+                column_types: vec![],
                 rows: vec![vec![serde_json::json!(1)]],
             },
             XlsxWorksheetData {
                 sheet_name: Some("Second".to_string()),
                 columns: vec!["name".to_string()],
+                column_types: vec![],
                 rows: vec![vec![serde_json::json!("Ada")]],
             },
         ])
@@ -1903,6 +1910,38 @@ mod tests {
                 row_count: 1,
             },
         ]);
+    }
+
+    #[test]
+    fn iris_import_uses_single_row_values_statements() {
+        let mappings = vec![TableImportColumnMapping {
+            source_column: "id".to_string(),
+            target_column: "id".to_string(),
+            target_data_type: None,
+        }];
+        let data = ParsedImportFile {
+            columns: vec!["id".to_string()],
+            rows: vec![vec![serde_json::json!(1)], vec![serde_json::json!(2)]],
+            total_rows: 2,
+        };
+
+        let batches =
+            build_import_insert_batches(&data, &mappings, &[], "items", "SQLUSER", &DatabaseType::Iris, 100).unwrap();
+
+        assert_eq!(batches.len(), 2);
+        assert_eq!(batches[0].sql, "INSERT INTO \"SQLUSER\".\"items\" (\"id\") VALUES\n(1)");
+        assert_eq!(batches[0].row_count, 1);
+        assert_eq!(batches[1].sql, "INSERT INTO \"SQLUSER\".\"items\" (\"id\") VALUES\n(2)");
+        assert_eq!(batches[1].row_count, 1);
+    }
+
+    #[test]
+    fn multi_row_insert_values_support_matches_database_dialects() {
+        assert!(!supports_multi_row_insert_values(&DatabaseType::Oracle));
+        assert!(!supports_multi_row_insert_values(&DatabaseType::OceanbaseOracle));
+        assert!(!supports_multi_row_insert_values(&DatabaseType::Iris));
+        assert!(supports_multi_row_insert_values(&DatabaseType::Postgres));
+        assert!(supports_multi_row_insert_values(&DatabaseType::Mysql));
     }
 
     #[test]

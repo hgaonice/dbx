@@ -157,6 +157,10 @@ export interface ConnectionConfig {
   external_config?: unknown;
   one_time?: boolean;
   read_only?: boolean;
+  /** Explicit production marker for every database reachable through this connection. */
+  is_production?: boolean;
+  /** Database-level production markers for multi-database connections. */
+  production_databases?: string[];
 }
 
 export type TransportLayerConfig = ({ type: "ssh" } & SshTunnelConfig) | ({ type: "proxy" } & ProxyTunnelConfig) | ({ type: "http_tunnel" } & HttpTunnelConfig);
@@ -270,6 +274,21 @@ export interface JdbcMavenBundleInfo {
   installed_at: string;
   path: string;
   artifacts: JdbcMavenArtifactInfo[];
+}
+
+export interface JdbcLocalArtifactInfo {
+  file_name: string;
+  path: string;
+  size: number;
+  sha256: string;
+}
+
+export interface JdbcLocalBundleInfo {
+  id: string;
+  name: string;
+  installed_at: string;
+  path: string;
+  artifacts: JdbcLocalArtifactInfo[];
 }
 
 export interface JdbcPluginStatus {
@@ -430,6 +449,8 @@ export interface OwnerInfo {
 
 export interface QueryResult {
   columns: string[];
+  /** Internal row identifiers appended to editable query results. */
+  hidden_column_indexes?: number[];
   /**
    * Database type name for each column, parallel to `columns`. Optional and may
    * be shorter/empty when a driver cannot supply types (schemaless stores,
@@ -442,6 +463,11 @@ export interface QueryResult {
    */
   column_sortables?: boolean[];
   rows: (string | number | boolean | null)[][];
+  /**
+   * Original MongoDB documents, kept in lockstep with `rows` for document
+   * preview. This is populated only for MongoDB document query results.
+   */
+  mongo_documents?: unknown[];
   affected_rows: number;
   execution_time_ms: number;
   truncated?: boolean;
@@ -467,6 +493,7 @@ export interface QueryResultRun {
   resultSortDirection?: "asc" | "desc";
   resultSortMode?: "database" | "local";
   resultLocalSortOriginalRows?: QueryResult["rows"];
+  resultLocalSortOriginalMongoDocuments?: QueryResult["mongo_documents"];
   orderByInput?: string;
   resultPageSql?: string;
   resultPageLimit?: number;
@@ -681,6 +708,7 @@ export interface QueryTab {
   resultSortDirection?: "asc" | "desc";
   resultSortMode?: "database" | "local";
   resultLocalSortOriginalRows?: QueryResult["rows"];
+  resultLocalSortOriginalMongoDocuments?: QueryResult["mongo_documents"];
   orderByInput?: string;
   resultPageSql?: string;
   resultPageLimit?: number;
@@ -700,8 +728,12 @@ export interface QueryTab {
   activeResultRunId?: string;
   resultAutoSave?: boolean;
   explainPlan?: import("@/lib/diagram/explainPlan").ParsedExplainPlan;
+  /** MySQL's regular EXPLAIN result, kept alongside its JSON visual plan. */
+  explainTableResult?: QueryResult;
   explainError?: string;
+  explainTableError?: string;
   explainSql?: string;
+  explainTableSql?: string;
   lastExplainedSql?: string;
   isExecuting: boolean;
   isCancelling?: boolean;
@@ -717,6 +749,8 @@ export interface QueryTab {
   executionId?: string;
   isExplaining?: boolean;
   explainExecutionId?: string;
+  /** Per-run connection session for sequential MySQL explain formats. */
+  explainClientSessionId?: string;
   mode: "data" | "query" | "redis" | "redis-dashboard" | "mongo" | "mongo-gridfs" | "mongo-bucket" | "vector" | "etcd" | "zookeeper" | "mq" | "nacos" | "objects" | "structure" | "users" | "dameng-jobs";
   mqTenant?: string;
   mqInitialTab?: "topics";
@@ -728,6 +762,7 @@ export interface QueryTab {
   structureInitialTarget?: TableStructureEditorTarget;
   structureDraft?: TableStructureEditorDraft;
   objectBrowser?: {
+    catalog?: string;
     schema?: string;
     objectType?: "tables";
     viewport?: ObjectBrowserViewport;
@@ -758,6 +793,7 @@ export interface QueryTab {
     selectStar: boolean;
     editableSourceKey?: string;
     multiSource?: boolean;
+    allowInsert?: boolean;
     allowInsertDelete?: boolean;
     sources?: {
       key: string;
